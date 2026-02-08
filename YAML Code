@@ -1,0 +1,187 @@
+alias: virtueller P1 + Winterbetrieb
+description: >
+  Virtueller P1 für Z-HA: virt = real - target. Target/Deadband/ChangeTH per
+  Helper. Im Deadband -> 0W. Hold per Change-Threshold gegen Pendeln.
+  Winterbetrieb:
+    - Entladen unterhalb Schwellwert blocken (virt=0 + outputlimits=0)
+    - Zusätzlich gesamt_soc_min gegen 25W Standby-Entladung umschalten:
+        Abruf >= Schwellwert -> 10% (mit 2min Nachlauf)
+        Abruf <  Schwellwert -> 50%
+  Zusatz:
+    - Winterbetrieb ON  -> setzt input_number.p1_sensor_target auf +20W
+    - Winterbetrieb OFF -> setzt input_number.p1_sensor_target auf -20W
+  Wake-Pulse:
+    - Wenn Z-HA (alt) nach Standby nicht reagiert, erzeugen wir bei Bedarf
+      alle 20s einen minimalen State-Change (+1W), um den Manager zu wecken.
+triggers:
+  - trigger: state
+    entity_id: sensor.shellypro3em_total_active_power
+  - trigger: state
+    entity_id: sensor.gesamt_kombisensor_laden_entladen
+  - trigger: state
+    entity_id: input_boolean.zendure_winterbetrieb
+  - trigger: state
+    entity_id: input_number.p1_sensor_target
+  - trigger: state
+    entity_id: input_number.p1_sensor_deathband
+  - trigger: state
+    entity_id: input_number.zendure_change_threshold_w
+  - trigger: state
+    entity_id: input_number.p1_schwellwert_winterbetrieb
+  - trigger: time_pattern
+    seconds: /20
+    id: heartbeat
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: |
+              {{ trigger.platform == 'state'
+                 and trigger.entity_id == 'input_boolean.zendure_winterbetrieb'
+                 and trigger.to_state is not none
+                 and trigger.to_state.state == 'on' }}
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.p1_sensor_target
+            data:
+              value: 20
+      - conditions:
+          - condition: template
+            value_template: |
+              {{ trigger.platform == 'state'
+                 and trigger.entity_id == 'input_boolean.zendure_winterbetrieb'
+                 and trigger.to_state is not none
+                 and trigger.to_state.state == 'off' }}
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.p1_sensor_target
+            data:
+              value: -20
+    default: []
+  - variables:
+      REAL: "{{ states('sensor.shellypro3em_total_active_power') | float(0) }}"
+      KOMBI: "{{ states('sensor.gesamt_kombisensor_laden_entladen') | float(0) }}"
+      TARGET_W: "{{ states('input_number.p1_sensor_target') | float(0) }}"
+      DEADBAND_W: "{{ states('input_number.p1_sensor_deathband') | float(0) }}"
+      CHANGE_TH_W: "{{ states('input_number.zendure_change_threshold_w') | float(80) }}"
+      WINTER: "{{ is_state('input_boolean.zendure_winterbetrieb', 'on') }}"
+      WINTER_TH_W: "{{ states('input_number.p1_schwellwert_winterbetrieb') | float(700) }}"
+      LAST: "{{ states('input_number.zendure_p1_last_setpoint') | float(0) }}"
+      VIRT_RAW: "{{ (REAL - TARGET_W) | float(0) }}"
+      IS_CHARGING_NOW: "{{ KOMBI < 0 }}"
+      CUR_DISCHARGE_W: "{{ (KOMBI if KOMBI > 0 else 0) | float(0) }}"
+      NEED_FROM_GRID_W: "{{ (VIRT_RAW if VIRT_RAW > 0 else 0) | float(0) }}"
+      REQ_W: "{{ (CUR_DISCHARGE_W + NEED_FROM_GRID_W) | float(0) }}"
+      DISCHARGE_REQ: "{{ VIRT_RAW > 0 }}"
+      STOP_WINTER_DISCHARGE: >-
+        {{ WINTER and (not IS_CHARGING_NOW) and DISCHARGE_REQ and (REQ_W <
+        WINTER_TH_W) }}
+      IN_DB: "{{ (VIRT_RAW | abs) <= DEADBAND_W }}"
+      DELTA_LAST: "{{ (VIRT_RAW - LAST) | abs }}"
+      STANDBY: "{{ (KOMBI | abs) < 50 }}"
+      TRIG_ID: "{{ trigger.id | default('') }}"
+      NEED_WAKE: |-
+        {{ (TRIG_ID == 'heartbeat')
+           and (not STOP_WINTER_DISCHARGE)
+           and (not IN_DB)
+           and (DELTA_LAST < CHANGE_TH_W)
+           and (VIRT_RAW > 0)
+           and STANDBY }}
+      VIRT_NEXT: |-
+        {% if STOP_WINTER_DISCHARGE %}
+          0
+        {% elif NEED_WAKE %}
+          {{ (LAST + 1) | round(0) }}
+        {% else %}
+          {% if IN_DB %}
+            0
+          {% elif DELTA_LAST < CHANGE_TH_W %}
+            {{ LAST | round(0) }}
+          {% else %}
+            {{ VIRT_RAW | round(0) }}
+          {% endif %}
+        {% endif %}
+      HOLDING: >-
+        {{ (not STOP_WINTER_DISCHARGE) and (not NEED_WAKE) and (IN_DB or
+        (DELTA_LAST < CHANGE_TH_W)) }}
+      IDLE_NOW: "{{ states('input_number.zendure_idle_ticks') | int(0) }}"
+      IDLE_NEXT: "{{ (IDLE_NOW + 1) if HOLDING else 0 }}"
+      SOC_MIN_ENTITY: input_number.gesamt_soc_min
+      HOLD_ENTITY: input_datetime.gesamt_soc_min_hold_until
+      HOLD_MINUTES: 2
+      SOC_MIN_NOW: "{{ states(SOC_MIN_ENTITY) | float(0) }}"
+      HOLD_UNTIL_RAW: "{{ states(HOLD_ENTITY) }}"
+      HOLD_UNTIL_TS: |-
+        {% if HOLD_UNTIL_RAW in ['unknown','unavailable','none',''] %}
+          0
+        {% else %}
+          {{ as_timestamp(HOLD_UNTIL_RAW) | float(0) }}
+        {% endif %}
+      NOW_TS: "{{ as_timestamp(now()) | float(0) }}"
+      HOLD_ACTIVE: "{{ NOW_TS < HOLD_UNTIL_TS }}"
+      WANT_SOC_MIN_10_NOW: "{{ WINTER and (not IS_CHARGING_NOW) and (REQ_W >= WINTER_TH_W) }}"
+      SOC_MIN_TARGET: |-
+        {% if not WINTER %}
+          {{ SOC_MIN_NOW | round(0) }}
+        {% elif WANT_SOC_MIN_10_NOW or HOLD_ACTIVE %}
+          10
+        {% else %}
+          50
+        {% endif %}
+      SOC_MIN_NEEDS_WRITE: >-
+        {{ WINTER and ((SOC_MIN_NOW | round(0)) != (SOC_MIN_TARGET | round(0)))
+        }}
+      HOLD_NEEDS_SET: "{{ WANT_SOC_MIN_10_NOW }}"
+      HOLD_UNTIL_NEXT: >-
+        {{ (now() + timedelta(minutes=HOLD_MINUTES)).strftime('%Y-%m-%d
+        %H:%M:%S') }}
+  - action: input_number.set_value
+    target:
+      entity_id: input_number.zendure_p1_last_setpoint
+    data:
+      value: "{{ VIRT_NEXT }}"
+  - action: input_number.set_value
+    target:
+      entity_id: input_number.zendure_idle_ticks
+    data:
+      value: "{{ IDLE_NEXT }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ STOP_WINTER_DISCHARGE }}"
+        sequence:
+          - action: number.set_value
+            target:
+              entity_id:
+                - number.l2_solarflow_2400_ac_output_limit
+                - number.l3_solarflow_2400_ac_output_limit
+            data:
+              value: 0
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ HOLD_NEEDS_SET }}"
+        sequence:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.gesamt_soc_min_hold_until
+            data:
+              datetime: "{{ HOLD_UNTIL_NEXT }}"
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ SOC_MIN_NEEDS_WRITE }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.gesamt_soc_min
+            data:
+              value: "{{ SOC_MIN_TARGET }}"
+    default: []
+mode: queued
+max: 5
