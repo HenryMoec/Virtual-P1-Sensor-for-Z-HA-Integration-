@@ -8,3 +8,12 @@ Content of the virtual P1:
   > within the Deathzone,the P1 shows "0"     to decrease the amount of regulation      steps
 - "Winterbetrieb"
   > adjustable switching threshold. P1         provides only loadings over the           threshold to work only in areas of        good efficency when there is not          enough solar energy
+
+- Helpers needed
+  
+  input_boolean.zendure_winterbetrieb
+  input_number.p1_sensor_target
+  input_number.p1_sensor_deathband
+  input_number.zendure_change_threshold_w
+ input_number.p1_schwellwert_winterbetrieb
+
