@@ -11,14 +11,14 @@ Content of the virtual P1:
 
 - Helpers needed
   
-  input_boolean.zendure_winterbetrieb
+input_boolean.zendure_winterbetrieb
    enable/disable "Winterbetrieb"
-  input_number.p1_sensor_target
+input_number.p1_sensor_target
    set sensor target
-  input_number.p1_sensor_deathband
+input_number.p1_sensor_deathband
    set Deathband to +-input_number
-  input_number.zendure_change_threshold_w
+input_number.zendure_change_threshold_w
    set switching target
- input_number.p1_schwellwert_winterbetrieb
+input_number.p1_schwellwert_winterbetrieb
    set switching threshold for Winterbetrieb
 
