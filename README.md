@@ -12,19 +12,19 @@ Content of the virtual P1:
 
 - Helpers needed:
   
-- input_number.zendure_p1_last_setpoint
+  - input_number.zendure_p1_last_setpoint
    (P1 output, have to be insert in Z-HA P1)
-- input_boolean.zendure_winterbetrieb
+  - input_boolean.zendure_winterbetrieb
    (enable/disable "Winterbetrieb")
-- input_number.p1_sensor_target
+  - input_number.p1_sensor_target
    (set sensor target)
-- input_number.p1_sensor_deathband
+  - input_number.p1_sensor_deathband
    (set Deathband to +-input_number)
-- input_number.zendure_change_threshold_w
+  - input_number.zendure_change_threshold_w
    (set switching target)
-- input_number.p1_schwellwert_winterbetrieb
+  - input_number.p1_schwellwert_winterbetrieb
    (set switching threshold for Winterbetrieb)
-- input_datetime.gesamt_soc_min_hold_until
+  - input_datetime.gesamt_soc_min_hold_until
    (needed for hysteresis till Winterbetrieb)
 
 - Sensors:
